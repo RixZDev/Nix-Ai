@@ -2,6 +2,7 @@ package com.nixai.app
 
 import android.content.Context
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Engine
@@ -110,7 +111,8 @@ class LlmEngine(private val ctx: Context, private val scope: CoroutineScope) {
                 conv.use { c ->
                     var acc = ""
                     c.sendMessageAsync(msgs.last().text).collect { m ->
-                        val t = m.toString()
+                        val t = m.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
+                        if (t.isEmpty()) return@collect
                         // Sirve tanto si el flujo entrega fragmentos nuevos como el texto acumulado
                         if (acc.isNotEmpty() && t.length > acc.length && t.startsWith(acc)) {
                             onChunk(t.substring(acc.length))

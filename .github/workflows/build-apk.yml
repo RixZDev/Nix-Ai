@@ -32,25 +32,6 @@ jobs:
           fi
           cp app/build/outputs/apk/debug/app-debug.apk NixAi.apk
 
-      - name: Diagnostico de la libreria LiteRT-LM
-        if: always()
-        run: |
-          AAR=$(find ~/.gradle -name "litertlm-android*.aar" | head -1)
-          if [ -n "$AAR" ]; then
-            mkdir -p /tmp/aar && cd /tmp/aar && unzip -oq "$AAR"
-            note() { # titulo, contenido
-              esc=$(printf '%s' "$2" | head -c 5500 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-              echo "::notice title=$1::$esc"
-            }
-            note "Contenido-clases" "$(unzip -l classes.jar | grep -o 'com/google/ai/edge/litertlm/[A-Za-z$]*\.class' | tr '\n' ' ')"
-            note "Content-Text" "$(javap -p -cp classes.jar 'com.google.ai.edge.litertlm.Content$Text' 2>&1 | head -20)$(javap -p -c -cp classes.jar com.google.ai.edge.litertlm.Contents 2>&1 | grep -A25 'String toString' | head -40)"
-            note "Message-toString" "$(javap -p -c -cp classes.jar com.google.ai.edge.litertlm.Message 2>&1 | grep -A30 'String toString' | head -45)"
-            note "Message-Companion" "$(javap -p -cp classes.jar 'com.google.ai.edge.litertlm.Message$Companion' 2>&1 | head -20)"
-            note "Config" "$(javap -p -cp classes.jar com.google.ai.edge.litertlm.SamplerConfig 2>&1 | head -14) $(javap -p -cp classes.jar com.google.ai.edge.litertlm.EngineConfig 2>&1 | head -14)"
-            note "Engine" "$(javap -p -cp classes.jar com.google.ai.edge.litertlm.Engine 2>&1 | head -25) $(javap -p -cp classes.jar com.google.ai.edge.litertlm.ConversationConfig 2>&1 | head -14)"
-            note "Conversation-async" "$(javap -p -cp classes.jar com.google.ai.edge.litertlm.Conversation 2>&1 | grep -iE 'async|cancel|Flow' | head -12)"
-          fi
-
       - name: Subir APK como artefacto
         uses: actions/upload-artifact@v4
         with:
