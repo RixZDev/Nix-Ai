@@ -61,6 +61,17 @@ dialog::backdrop{background:#0008}
 dialog label{display:block;margin:12px 0 4px;color:var(--muted);font-size:13px}
 dialog input,dialog select,dialog textarea{width:100%}
 .err{color:#f28b82;white-space:pre-wrap}
+.hide{display:none!important}
+#setup{position:fixed;inset:0;z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+#setup .card{max-width:420px;width:100%;text-align:center}
+#setup h2{font-size:34px;margin:0 0 6px;background:linear-gradient(90deg,#8ab4f8,#c58af9);-webkit-background-clip:text;color:transparent}
+#setup p{color:var(--muted);margin:8px 0 18px}
+#setup .btn{display:block;width:100%;text-align:center;margin-top:10px;padding:13px}
+#setup .link{background:none;border:none;color:var(--muted);text-decoration:underline;margin-top:14px;font-size:13px}
+.bar{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin:18px 0 8px}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#8ab4f8,#c58af9);transition:width .4s}
+.spin{width:34px;height:34px;border:4px solid var(--panel2);border-top-color:var(--accent);border-radius:50%;margin:18px auto;animation:r 1s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
 @media(max-width:700px){#sidebar{position:fixed;inset:0 auto 0 0;z-index:5;height:100%}}
 </style>
 </head>
@@ -84,7 +95,14 @@ dialog input,dialog select,dialog textarea{width:100%}
       <textarea id="input" rows="1" placeholder="Escribe tu mensaje… (Enter envía, Shift+Enter nueva línea)"></textarea>
       <button id="send" title="Enviar">↑</button>
     </div>
-    <div class="note">Nix Ai usa tu propio modelo open source: sin límite de mensajes. Verifica el código antes de usarlo.</div>
+    <div class="note">Nix Ai usa un modelo open source en tu dispositivo: sin límite de mensajes. Puede equivocarse; revisa el código. Verifica el código antes de usarlo.</div>
+  </div>
+</div>
+
+<div id="setup" class="hide">
+  <div class="card">
+    <h2>Nix Ai</h2>
+    <div id="setupBody"></div>
   </div>
 </div>
 
@@ -92,13 +110,16 @@ dialog input,dialog select,dialog textarea{width:100%}
   <h3 style="margin-top:0">Configuración</h3>
   <label>Tipo de servidor</label>
   <select id="sProvider">
+    <option value="local" id="optLocal">Este celular (automático, recomendado)</option>
     <option value="ollama">Ollama (http://localhost:11434)</option>
     <option value="openai">Compatible con OpenAI (LM Studio, llama.cpp, vLLM, Jan…)</option>
   </select>
+  <div id="remoteFields">
   <label>URL del servidor</label>
   <input id="sUrl" placeholder="http://localhost:11434">
   <label>API key (opcional)</label>
   <input id="sKey" type="password" placeholder="Solo si tu servidor la pide">
+  </div>
   <label>Prompt de sistema</label>
   <textarea id="sSystem" rows="4"></textarea>
   <label>Temperatura: <span id="tVal"></span></label>
@@ -118,9 +139,12 @@ const store = {
 let chats = store.get('chats', []);
 let currentId = store.get('current', null);
 let cfg = Object.assign({
-  provider:'ollama', url:'http://localhost:11434', key:'', model:'', temp:0.7,
+  provider:'ollama', url:'http://localhost:11434', key:'', model:'', temp:0.7, v:0,
   system:'Eres Nix Ai, un asistente experto en programación. Responde en el idioma del usuario, con código completo y bien explicado.'
 }, store.get('cfg', {}));
+const NATIVE = !!window.NixNative;
+if (NATIVE && cfg.v !== 2){ cfg.provider = 'local'; cfg.model = 'local'; cfg.v = 2; }
+if (!NATIVE) document.querySelector('#optLocal').remove();
 let abortCtl = null;
 
 const save = () => { store.set('chats', chats); store.set('current', currentId); store.set('cfg', cfg); };
@@ -205,6 +229,9 @@ const base = () => cfg.url.replace(/\/+$/, '');
 
 async function loadModels(){
   const sel = $('#modelSel'); sel.innerHTML = '';
+  if (cfg.provider === 'local'){
+    sel.append(new Option('Nix Ai · Qwen2.5 1.5B (en tu celular)', 'local')); cfg.model = 'local'; save(); return;
+  }
   try {
     let names = [];
     if (cfg.provider === 'ollama'){
@@ -239,6 +266,7 @@ async function send(){
   if (abortCtl){ abortCtl.abort(); return; }
   const inp = $('#input'); const text = inp.value.trim();
   if (!text) return;
+  if (cfg.provider === 'local' && !localReady){ showSetup(); return; }
   if (!cfg.model){ await loadModels(); if (!cfg.model) return; }
   const c = cur() || (newChat(), cur());
   c.messages.push({ role:'user', content:text });
@@ -261,6 +289,10 @@ async function send(){
     pending = false; body.innerHTML = md(reply.content); body.classList.add('cursor'); decorate(body); scrollDown(); }); };
 
   try {
+    if (cfg.provider === 'local'){
+      await sendLocal(msgs, reply, paint);
+      return;
+    }
     const isOllama = cfg.provider === 'ollama';
     const url = base() + (isOllama ? '/api/chat' : '/v1/chat/completions');
     const payload = isOllama
@@ -295,6 +327,67 @@ async function send(){
   }
 }
 
+/* ---------- IA local (en el celular) ---------- */
+let localReady = false;
+let curGen = null;
+window.NixNativeCb = {
+  token(id, t){ if (curGen && curGen.id === id) curGen.onToken(t); },
+  done(id){ if (curGen && curGen.id === id){ const g = curGen; curGen = null; g.resolve(); } },
+  error(id, m){ if (curGen && curGen.id === id){ const g = curGen; curGen = null; g.reject(new Error(m)); } }
+};
+function sendLocal(msgs, reply, paint){
+  return new Promise((resolve, reject) => {
+    const id = uid();
+    const system = (msgs[0] && msgs[0].role === 'system') ? msgs[0].content : '';
+    const hist = msgs.filter(m => m.role !== 'system');
+    curGen = { id, resolve, reject, onToken: t => { reply.content += t; paint(); } };
+    abortCtl.signal.addEventListener('abort', () => { try { NixNative.stop(); } catch {} });
+    try { NixNative.generate(id, JSON.stringify(hist), system, cfg.temp); } catch (e){ curGen = null; reject(e); }
+  });
+}
+
+const gb = n => (n / 1e9).toFixed(1) + ' GB';
+const mb = n => Math.round(n / 1e6) + ' MB';
+let pollT = null;
+
+function setupHTML(h){ $('#setupBody').innerHTML = h; }
+function showSetup(){ $('#setup').classList.remove('hide'); if (!pollT) poll(); }
+function hideSetup(){ $('#setup').classList.add('hide'); if (pollT){ clearTimeout(pollT); pollT = null; } }
+
+function adv(){
+  hideSetup(); cfg.provider = 'ollama'; cfg.url = 'http://localhost:11434'; cfg.model = ''; save();
+  $('#openSettings').click();
+}
+window.__dl = wifi => { try { NixNative.startDownload(wifi); } catch {} showSetup(); };
+window.__retry = () => { try { NixNative.retryLoad(); } catch {} showSetup(); };
+window.__reset = () => { try { NixNative.resetModel(); } catch {} showSetup(); };
+window.__adv = adv;
+
+async function poll(){
+  pollT = null;
+  if (!NATIVE || cfg.provider !== 'local'){ hideSetup(); return; }
+  let st;
+  try { st = JSON.parse(NixNative.getState()); } catch { pollT = setTimeout(poll, 1000); return; }
+  const dl = st.download || {};
+  localReady = !!st.loaded;
+  if (st.loaded){ hideSetup(); return; }
+
+  if (st.error){
+    setupHTML('<p>' + st.error + '</p><button class="btn primary" onclick="__retry()">Reintentar</button><button class="btn" onclick="__reset()">Descargar el modelo otra vez</button><button class="link" onclick="__adv()">Usar mi propio servidor</button>');
+  } else if (dl.state === 'ready' || st.loading){
+    setupHTML('<div class="spin"></div><p>Preparando Nix Ai…<br>La primera vez puede tardar un poco.</p>');
+  } else if (dl.state === 'downloading' || dl.state === 'waiting'){
+    const pct = dl.total > 0 ? Math.min(100, Math.round(dl.done * 100 / dl.total)) : 0;
+    setupHTML('<p>' + (dl.state === 'waiting' ? 'Esperando conexión Wi-Fi…' : 'Descargando el cerebro de Nix Ai…') + '</p><div class="bar"><i style="width:' + pct + '%"></i></div><p>' + pct + '% · ' + mb(dl.done) + ' de ' + (dl.total > 0 ? mb(dl.total) : '…') + '</p><p style="font-size:13px">Puedes cerrar la app: la descarga continúa y se reanuda sola.</p><button class="link" onclick="__dl(false)">Usar datos móviles</button>');
+  } else if (dl.state === 'failed'){
+    setupHTML('<p>' + (dl.message || 'La descarga falló.') + '</p><button class="btn primary" onclick="__dl(true)">Reintentar</button>');
+  } else {
+    const low = st.freeBytes < st.neededBytes;
+    setupHTML('<p>Tu asistente de IA que funciona <b>en tu celular</b>: sin internet, sin límite de mensajes y sin cuentas.</p><p>Solo necesita descargar su modelo una vez (<b>~1.6 GB</b>).' + (low ? '<br><span style="color:#f28b82">Te falta espacio libre: tienes ' + gb(st.freeBytes) + ' y se necesitan ~2.3 GB.</span>' : '') + '</p><button class="btn primary" onclick="__dl(true)">Descargar e iniciar (Wi-Fi)</button><button class="btn" onclick="__dl(false)">Descargar con datos móviles</button><button class="link" onclick="__adv()">Usar mi propio servidor (avanzado)</button>');
+  }
+  pollT = setTimeout(poll, 700);
+}
+
 /* ---------- Eventos ---------- */
 $('#send').onclick = send;
 $('#input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
@@ -308,20 +401,22 @@ $('#modelSel').onchange = e => { cfg.model = e.target.value; save(); };
 const dlg = $('#settings');
 $('#openSettings').onclick = () => {
   $('#sProvider').value = cfg.provider; $('#sUrl').value = cfg.url; $('#sKey').value = cfg.key;
-  $('#sSystem').value = cfg.system; $('#sTemp').value = cfg.temp; $('#tVal').textContent = cfg.temp; dlg.showModal();
+  $('#sSystem').value = cfg.system; $('#sTemp').value = cfg.temp; $('#tVal').textContent = cfg.temp; syncProv(); dlg.showModal();
 };
 $('#sTemp').oninput = e => $('#tVal').textContent = e.target.value;
-$('#sProvider').onchange = e => { $('#sUrl').value = e.target.value === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234'; };
+const syncProv = () => { $('#remoteFields').classList.toggle('hide', $('#sProvider').value === 'local'); };
+$('#sProvider').onchange = e => { if (e.target.value !== 'local') $('#sUrl').value = e.target.value === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234'; syncProv(); };
 $('#sCancel').onclick = () => dlg.close();
 $('#sSave').onclick = () => {
-  cfg.provider = $('#sProvider').value; cfg.url = $('#sUrl').value.trim() || cfg.url; cfg.key = $('#sKey').value;
-  cfg.system = $('#sSystem').value; cfg.temp = parseFloat($('#sTemp').value); cfg.model = '';
-  save(); dlg.close(); loadModels();
+  cfg.provider = $('#sProvider').value; if (cfg.provider !== 'local'){ cfg.url = $('#sUrl').value.trim() || cfg.url; cfg.key = $('#sKey').value; }
+  cfg.system = $('#sSystem').value; cfg.temp = parseFloat($('#sTemp').value); cfg.model = cfg.provider === 'local' ? 'local' : '';
+  save(); dlg.close(); loadModels(); if (cfg.provider === 'local') showSetup();
 };
 
 if (!chats.length || !cur()) newChat(); else renderAll();
 if (window.innerWidth < 700) $('#sidebar').classList.add('hidden');
 loadModels();
+if (NATIVE && cfg.provider === 'local') showSetup();
 </script>
 </body>
 </html>

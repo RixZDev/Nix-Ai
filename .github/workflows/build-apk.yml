@@ -22,8 +22,31 @@ jobs:
       - name: Compilar APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          set +e
+          ./gradlew assembleDebug --no-daemon --stacktrace > build.log 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            msg=$(grep -E "^e: |error:|What went wrong|Could not|Caused by" -A2 build.log | head -c 3800 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=BUILD FAILED::$msg"
+            exit $code
+          fi
           cp app/build/outputs/apk/debug/app-debug.apk NixAi.apk
+
+      - name: Diagnostico de la libreria LiteRT-LM
+        if: always()
+        run: |
+          AAR=$(find ~/.gradle -name "litertlm-android*.aar" | head -1)
+          echo "AAR=$AAR"
+          if [ -n "$AAR" ]; then
+            mkdir -p /tmp/aar && cd /tmp/aar && unzip -oq "$AAR"
+            ver=$(basename "$AAR")
+            out="$ver"$'\n'
+            for c in Message Contents Conversation ConversationConfig SamplerConfig EngineConfig Engine Backend; do
+              out+=$(javap -cp classes.jar "com.google.ai.edge.litertlm.$c" 2>&1 | head -40)$'\n'
+            done
+            esc=$(printf '%s' "$out" | head -c 6000 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::notice title=LITERTLM API::$esc"
+          fi
 
       - name: Subir APK como artefacto
         uses: actions/upload-artifact@v4
@@ -34,6 +57,6 @@ jobs:
       - name: Publicar Release con el APK
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0-${{ github.run_number }}
-          name: Nix Ai v1.0 (build ${{ github.run_number }})
+          tag_name: v2.0-${{ github.run_number }}
+          name: Nix Ai v2.0 (build ${{ github.run_number }})
           files: NixAi.apk
