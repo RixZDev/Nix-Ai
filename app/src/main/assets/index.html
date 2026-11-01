@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#131314">
+<title>Nix Ai</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+:root{--bg:#131314;--panel:#1e1f20;--panel2:#282a2c;--text:#e3e3e3;--muted:#9aa0a6;--accent:#8ab4f8;--border:#37393b;--user:#2b3a55}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{height:100dvh}
+body{background:var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex}
+button{font:inherit;color:inherit;cursor:pointer}
+#sidebar{width:270px;background:var(--panel);display:flex;flex-direction:column;padding:12px;gap:8px;transition:margin .2s;flex-shrink:0}
+#sidebar.hidden{margin-left:-270px}
+.btn{background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;text-align:left}
+.btn:hover{background:#34373a}
+.btn.primary{background:var(--accent);color:#0b1b33;border:none;font-weight:600}
+#chatList{flex:1;overflow:auto;display:flex;flex-direction:column;gap:2px}
+.chatItem{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;cursor:pointer;color:var(--muted)}
+.chatItem:hover,.chatItem.active{background:var(--panel2);color:var(--text)}
+.chatItem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.chatItem .del{opacity:0;background:none;border:none;color:var(--muted)}
+.chatItem:hover .del{opacity:1}
+#main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
+header h1{font-size:16px;margin:0;font-weight:600;flex:1}
+select,input,textarea{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font:inherit}
+#messages{flex:1;overflow:auto;padding:20px 0}
+.wrap{max-width:820px;margin:0 auto;padding:0 16px}
+.msg{display:flex;gap:12px;margin-bottom:22px}
+.avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:14px;font-weight:700}
+.msg.user .avatar{background:var(--user)}
+.msg.assistant .avatar{background:linear-gradient(135deg,#8ab4f8,#c58af9);color:#10131a}
+.body{flex:1;min-width:0;overflow-wrap:anywhere}
+.msg.user .body{white-space:pre-wrap}
+.body p{margin:.4em 0}
+.body pre{position:relative;background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:14px;overflow:auto;margin:10px 0}
+.body code{font-family:ui-monospace,Consolas,monospace;font-size:13.5px}
+.body :not(pre)>code{background:var(--panel2);padding:2px 6px;border-radius:5px}
+.copy{position:absolute;top:6px;right:6px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;font-size:12px;padding:2px 8px}
+.body table{border-collapse:collapse}.body td,.body th{border:1px solid var(--border);padding:6px 10px}
+.body a{color:var(--accent)}
+.cursor::after{content:"▍";animation:b 1s infinite}
+@keyframes b{50%{opacity:0}}
+.empty{text-align:center;margin-top:18vh;color:var(--muted)}
+.empty h2{font-size:34px;margin:0 0 8px;background:linear-gradient(90deg,#8ab4f8,#c58af9);-webkit-background-clip:text;color:transparent}
+#composer{padding:12px 16px 18px}
+#box{max-width:820px;margin:0 auto;background:var(--panel);border:1px solid var(--border);border-radius:18px;display:flex;align-items:flex-end;gap:8px;padding:8px 10px}
+#input{flex:1;background:none;border:none;resize:none;max-height:200px;outline:none;padding:8px}
+#send{width:38px;height:38px;border-radius:50%;border:none;background:var(--accent);color:#0b1b33;font-size:18px;font-weight:700}
+#send.stop{background:#f28b82}
+.note{text-align:center;color:var(--muted);font-size:12px;margin-top:8px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:20px;width:min(480px,92vw)}
+dialog::backdrop{background:#0008}
+dialog label{display:block;margin:12px 0 4px;color:var(--muted);font-size:13px}
+dialog input,dialog select,dialog textarea{width:100%}
+.err{color:#f28b82;white-space:pre-wrap}
+@media(max-width:700px){#sidebar{position:fixed;inset:0 auto 0 0;z-index:5;height:100%}}
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <button class="btn primary" id="newChat">+ Nuevo chat</button>
+  <div id="chatList"></div>
+  <button class="btn" id="openSettings">⚙ Configuración</button>
+</aside>
+
+<div id="main">
+  <header>
+    <button class="btn" id="toggle">☰</button>
+    <h1>Nix Ai</h1>
+    <select id="modelSel" title="Modelo"></select>
+    <button class="btn" id="refresh" title="Recargar modelos">⟳</button>
+  </header>
+  <div id="messages"><div class="wrap" id="thread"></div></div>
+  <div id="composer">
+    <div id="box">
+      <textarea id="input" rows="1" placeholder="Escribe tu mensaje… (Enter envía, Shift+Enter nueva línea)"></textarea>
+      <button id="send" title="Enviar">↑</button>
+    </div>
+    <div class="note">Nix Ai usa tu propio modelo open source: sin límite de mensajes. Verifica el código antes de usarlo.</div>
+  </div>
+</div>
+
+<dialog id="settings">
+  <h3 style="margin-top:0">Configuración</h3>
+  <label>Tipo de servidor</label>
+  <select id="sProvider">
+    <option value="ollama">Ollama (http://localhost:11434)</option>
+    <option value="openai">Compatible con OpenAI (LM Studio, llama.cpp, vLLM, Jan…)</option>
+  </select>
+  <label>URL del servidor</label>
+  <input id="sUrl" placeholder="http://localhost:11434">
+  <label>API key (opcional)</label>
+  <input id="sKey" type="password" placeholder="Solo si tu servidor la pide">
+  <label>Prompt de sistema</label>
+  <textarea id="sSystem" rows="4"></textarea>
+  <label>Temperatura: <span id="tVal"></span></label>
+  <input id="sTemp" type="range" min="0" max="1.5" step="0.1">
+  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+    <button class="btn" id="sCancel">Cancelar</button>
+    <button class="btn primary" id="sSave">Guardar</button>
+  </div>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d){ try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } },
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+};
+let chats = store.get('chats', []);
+let currentId = store.get('current', null);
+let cfg = Object.assign({
+  provider:'ollama', url:'http://localhost:11434', key:'', model:'', temp:0.7,
+  system:'Eres Nix Ai, un asistente experto en programación. Responde en el idioma del usuario, con código completo y bien explicado.'
+}, store.get('cfg', {}));
+let abortCtl = null;
+
+const save = () => { store.set('chats', chats); store.set('current', currentId); store.set('cfg', cfg); };
+const cur = () => chats.find(c => c.id === currentId);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+function newChat(){
+  const c = { id: uid(), title: 'Nuevo chat', messages: [] };
+  chats.unshift(c); currentId = c.id; save(); renderAll();
+}
+
+function renderList(){
+  const el = $('#chatList'); el.innerHTML = '';
+  chats.forEach(c => {
+    const d = document.createElement('div');
+    d.className = 'chatItem' + (c.id === currentId ? ' active' : '');
+    const s = document.createElement('span'); s.textContent = c.title;
+    const x = document.createElement('button'); x.className = 'del'; x.textContent = '✕';
+    x.onclick = e => { e.stopPropagation(); chats = chats.filter(k => k.id !== c.id);
+      if (currentId === c.id) currentId = chats[0]?.id ?? null;
+      if (!currentId) return newChat();
+      save(); renderAll(); };
+    d.onclick = () => { if (abortCtl) return; currentId = c.id; save(); renderAll(); if (window.innerWidth < 700) $('#sidebar').classList.add('hidden'); };
+    d.append(s, x); el.append(d);
+  });
+}
+
+function md(text){
+  if (window.marked && window.DOMPurify){
+    const html = marked.parse(text, { breaks: true });
+    return DOMPurify.sanitize(html);
+  }
+  const p = document.createElement('p'); p.textContent = text; return p.outerHTML;
+}
+
+function decorate(body){
+  body.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.copy')) return;
+    const code = pre.querySelector('code');
+    if (window.hljs && code) { try { hljs.highlightElement(code) } catch {} }
+    const b = document.createElement('button'); b.className = 'copy'; b.textContent = 'Copiar';
+    b.onclick = async () => {
+      const txt = code ? code.innerText : pre.innerText;
+      let ok = false;
+      try { await navigator.clipboard.writeText(txt); ok = true; } catch {}
+      if (!ok){ try { const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.append(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch {} }
+      b.textContent = ok ? '¡Copiado!' : 'Error'; setTimeout(() => b.textContent = 'Copiar', 1200);
+    };
+    pre.append(b);
+  });
+}
+
+function msgEl(m, streaming){
+  const d = document.createElement('div'); d.className = 'msg ' + m.role;
+  const a = document.createElement('div'); a.className = 'avatar'; a.textContent = m.role === 'user' ? 'Tú' : 'IA';
+  const b = document.createElement('div'); b.className = 'body';
+  if (m.role === 'user') b.textContent = m.content;
+  else { b.innerHTML = md(m.content || ''); if (streaming) b.classList.add('cursor'); decorate(b); }
+  d.append(a, b); return d;
+}
+
+function renderThread(){
+  const t = $('#thread'); t.innerHTML = '';
+  const c = cur();
+  if (!c || !c.messages.length){
+    t.innerHTML = '<div class="empty"><h2>Nix Ai</h2><div>Hola 👋 ¿En qué te ayudo hoy?</div></div>';
+    return;
+  }
+  c.messages.forEach(m => t.append(msgEl(m)));
+  scrollDown();
+}
+function scrollDown(){ const m = $('#messages'); m.scrollTop = m.scrollHeight; }
+function renderAll(){ renderList(); renderThread(); }
+
+/* ---------- Modelos ---------- */
+function headers(){
+  const h = { 'Content-Type': 'application/json' };
+  if (cfg.key) h.Authorization = 'Bearer ' + cfg.key;
+  return h;
+}
+const base = () => cfg.url.replace(/\/+$/, '');
+
+async function loadModels(){
+  const sel = $('#modelSel'); sel.innerHTML = '';
+  try {
+    let names = [];
+    if (cfg.provider === 'ollama'){
+      const r = await fetch(base() + '/api/tags'); const j = await r.json();
+      names = (j.models || []).map(m => m.name);
+    } else {
+      const r = await fetch(base() + '/v1/models', { headers: headers() }); const j = await r.json();
+      names = (j.data || []).map(m => m.id);
+    }
+    if (!names.length) throw new Error('El servidor no tiene modelos instalados.');
+    names.forEach(n => sel.append(new Option(n, n)));
+    if (!names.includes(cfg.model)) cfg.model = names[0];
+    sel.value = cfg.model; save();
+  } catch (e) {
+    sel.append(new Option('Sin conexión', ''));
+    showError('No pude conectar con ' + base() + '\n\nAbre ⚙ Configuración y escribe la dirección de tu servidor (en el celular usa la IP de tu PC, por ejemplo http://192.168.1.50:11434). Asegúrate de que Ollama esté corriendo con OLLAMA_HOST=0.0.0.0 y OLLAMA_ORIGINS=*.');
+  }
+}
+
+function showError(msg){
+  const t = $('#thread');
+  const d = document.createElement('div'); d.className = 'err'; d.textContent = msg; d.style.marginBottom = '16px';
+  t.append(d); scrollDown();
+}
+
+/* ---------- Envío y streaming ---------- */
+function setBusy(b){
+  const s = $('#send'); s.textContent = b ? '■' : '↑'; s.classList.toggle('stop', b); s.title = b ? 'Detener' : 'Enviar';
+}
+
+async function send(){
+  if (abortCtl){ abortCtl.abort(); return; }
+  const inp = $('#input'); const text = inp.value.trim();
+  if (!text) return;
+  if (!cfg.model){ await loadModels(); if (!cfg.model) return; }
+  const c = cur() || (newChat(), cur());
+  c.messages.push({ role:'user', content:text });
+  if (c.messages.length === 1) c.title = text.slice(0, 40);
+  const reply = { role:'assistant', content:'' };
+  c.messages.push(reply);
+  inp.value = ''; inp.style.height = 'auto';
+  save(); renderList(); renderThread();
+
+  const el = msgEl(reply, true); $('#thread').append(el);
+  const body = el.querySelector('.body'); scrollDown();
+
+  const msgs = [];
+  if (cfg.system.trim()) msgs.push({ role:'system', content:cfg.system });
+  c.messages.slice(0, -1).forEach(m => msgs.push({ role:m.role, content:m.content }));
+
+  abortCtl = new AbortController(); setBusy(true);
+  let pending = false;
+  const paint = () => { if (pending) return; pending = true; requestAnimationFrame(() => {
+    pending = false; body.innerHTML = md(reply.content); body.classList.add('cursor'); decorate(body); scrollDown(); }); };
+
+  try {
+    const isOllama = cfg.provider === 'ollama';
+    const url = base() + (isOllama ? '/api/chat' : '/v1/chat/completions');
+    const payload = isOllama
+      ? { model:cfg.model, messages:msgs, stream:true, options:{ temperature:cfg.temp } }
+      : { model:cfg.model, messages:msgs, stream:true, temperature:cfg.temp };
+    const r = await fetch(url, { method:'POST', headers:headers(), body:JSON.stringify(payload), signal:abortCtl.signal });
+    if (!r.ok) throw new Error('Error ' + r.status + ': ' + await r.text());
+
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    while (true){
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream:true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (let line of lines){
+        line = line.trim(); if (!line) continue;
+        if (!isOllama){ if (!line.startsWith('data:')) continue; line = line.slice(5).trim(); if (line === '[DONE]') continue; }
+        try {
+          const j = JSON.parse(line);
+          const piece = isOllama ? j.message?.content : j.choices?.[0]?.delta?.content;
+          if (piece){ reply.content += piece; paint(); }
+        } catch {}
+      }
+    }
+  } catch (e){
+    if (e.name !== 'AbortError'){
+      reply.content += (reply.content ? '\n\n' : '') + '⚠️ ' + e.message;
+    }
+  } finally {
+    abortCtl = null; setBusy(false);
+    body.classList.remove('cursor'); body.innerHTML = md(reply.content || '*(sin respuesta)*'); decorate(body);
+    save();
+  }
+}
+
+/* ---------- Eventos ---------- */
+$('#send').onclick = send;
+$('#input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
+$('#input').addEventListener('input', e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px'; });
+$('#newChat').onclick = () => { if (!abortCtl) newChat(); };
+$('#toggle').onclick = () => $('#sidebar').classList.toggle('hidden');
+$('#main').addEventListener('click', () => { if (window.innerWidth < 700) $('#sidebar').classList.add('hidden'); });
+$('#refresh').onclick = loadModels;
+$('#modelSel').onchange = e => { cfg.model = e.target.value; save(); };
+
+const dlg = $('#settings');
+$('#openSettings').onclick = () => {
+  $('#sProvider').value = cfg.provider; $('#sUrl').value = cfg.url; $('#sKey').value = cfg.key;
+  $('#sSystem').value = cfg.system; $('#sTemp').value = cfg.temp; $('#tVal').textContent = cfg.temp; dlg.showModal();
+};
+$('#sTemp').oninput = e => $('#tVal').textContent = e.target.value;
+$('#sProvider').onchange = e => { $('#sUrl').value = e.target.value === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234'; };
+$('#sCancel').onclick = () => dlg.close();
+$('#sSave').onclick = () => {
+  cfg.provider = $('#sProvider').value; cfg.url = $('#sUrl').value.trim() || cfg.url; cfg.key = $('#sKey').value;
+  cfg.system = $('#sSystem').value; cfg.temp = parseFloat($('#sTemp').value); cfg.model = '';
+  save(); dlg.close(); loadModels();
+};
+
+if (!chats.length || !cur()) newChat(); else renderAll();
+if (window.innerWidth < 700) $('#sidebar').classList.add('hidden');
+loadModels();
+</script>
+</body>
+</html>
